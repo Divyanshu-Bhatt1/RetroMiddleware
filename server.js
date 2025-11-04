@@ -1,36 +1,56 @@
 require('dotenv').config();
 const express = require('express');
-const cors = require('cors'); 
+const cors = require('cors');
 const { fetchShopifyData, GET_ORDER_DETAILS_QUERY, GET_CUSTOMER_DETAILS_QUERY } = require('./utils/shopifyApi');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Middleware order is important! express.json() should be before routes.
+app.use(cors()); // Allow all CORS for flexibility during development/deployment
+app.use(express.json()); // Essential for parsing JSON request bodies
 
-app.use(cors()); 
-app.use(express.json()); 
-
-
+// --- Health Check Endpoint ---
 app.get('/health', (req, res) => {
   res.status(200).send('Middleware is running!');
 });
 
+// Helper to normalize phone numbers (remove non-digits and ensure E.164-like format)
+const normalizePhoneNumber = (phone) => {
+  if (!phone) return null;
+  const digits = phone.replace(/\D/g, ''); // Remove all non-digit characters
+  if (digits.length === 10) { // Assume US number, prepend +1
+    return `+1${digits}`;
+  }
+  if (digits.length === 11 && digits.startsWith('1')) { // Assume US number with leading 1
+    return `+${digits}`;
+  }
+  return `+${digits}`; // Fallback, prepend + to whatever digits remain
+};
 
+// --- Endpoint to Get Order Details ---
 app.post('/get-order-details', async (req, res) => {
-  const { queryType, value } = req.body; 
+  console.log('Received /get-order-details request. Body:', req.body); // LOG THE INCOMING BODY
+
+  const { queryType, value } = req.body;
 
   if (!queryType || !value) {
-    return res.status(400).json({ error: "Missing 'queryType' or 'value' in request body." });
+    console.error("Validation Error: Missing 'queryType' or 'value' in request body.", req.body);
+    // Ensure the error response matches what Retell AI expects to see as an error in its logs
+    return res.status(400).json({
+      success: false,
+      error: "Missing 'queryType' or 'value' in request body. Please provide both.",
+      received_body: req.body // Include received body for debugging
+    });
   }
 
   let queryString;
-  // Make the query string dynamic based on the queryType
   switch (queryType) {
-    case 'name':
-      queryString = `name:${value}`;
+    case 'name': // Shopify order number
+      queryString = `name:${value.replace('#', '')}`; // Remove '#' if present
       break;
     case 'phone':
-      queryString = `phone:${value}`;
+      queryString = `phone:${normalizePhoneNumber(value)}`;
       break;
     case 'email':
       queryString = `email:${value}`;
@@ -39,20 +59,24 @@ app.post('/get-order-details', async (req, res) => {
       queryString = `id:${value}`;
       break;
     default:
-      return res.status(400).json({ error: `Invalid queryType: ${queryType}. Supported: name, phone, email, id.` });
+      console.error(`Invalid queryType: ${queryType}. Supported: name, phone, email, id.`);
+      return res.status(400).json({
+        success: false,
+        error: `Invalid queryType: ${queryType}. Supported types are: name (order number), phone, email, id.`,
+        received_queryType: queryType
+      });
   }
 
   try {
     const data = await fetchShopifyData(GET_ORDER_DETAILS_QUERY, { queryString });
-    const order = data.orders.edges[0]?.node;
+    const order = data?.orders?.edges?.[0]?.node;
 
     if (order) {
-      // Structure the response for Retell AI
       const formattedOrder = {
-        orderId: order.id.split('/').pop(), // Extract just the ID number
+        orderId: order.id.split('/').pop(),
         orderName: order.name,
-        customerEmail: order.email,
-        customerPhone: order.phone,
+        customerEmail: order.email || 'N/A',
+        customerPhone: order.phone || 'N/A',
         lineItems: order.lineItems.edges.map(item => ({
           title: item.node.title,
           quantity: item.node.quantity
@@ -71,15 +95,23 @@ app.post('/get-order-details', async (req, res) => {
 
   } catch (error) {
     console.error("Error in /get-order-details:", error);
-    res.status(500).json({ success: false, error: "Failed to fetch order details", details: error.message });
+    res.status(500).json({ success: false, error: "Failed to fetch order details from Shopify.", details: error.message });
   }
 });
 
-
+// --- Endpoint to Get Customer Details ---
 app.post('/get-customer-details', async (req, res) => {
-  const { queryType, value } = req.body; 
+  console.log('Received /get-customer-details request. Body:', req.body); // LOG THE INCOMING BODY
+
+  const { queryType, value } = req.body;
+
   if (!queryType || !value) {
-    return res.status(400).json({ error: "Missing 'queryType' or 'value' in request body." });
+    console.error("Validation Error: Missing 'queryType' or 'value' in request body.", req.body);
+    return res.status(400).json({
+      success: false,
+      error: "Missing 'queryType' or 'value' in request body. Please provide both.",
+      received_body: req.body
+    });
   }
 
   let queryString;
@@ -88,18 +120,23 @@ app.post('/get-customer-details', async (req, res) => {
       queryString = `email:${value}`;
       break;
     case 'phone':
-      queryString = `phone:${value}`;
+      queryString = `phone:${normalizePhoneNumber(value)}`;
       break;
     case 'firstName':
       queryString = `first_name:${value}`;
       break;
     default:
-      return res.status(400).json({ error: `Invalid queryType: ${queryType}. Supported: email, phone, firstName.` });
+      console.error(`Invalid queryType: ${queryType}. Supported: email, phone, firstName.`);
+      return res.status(400).json({
+        success: false,
+        error: `Invalid queryType: ${queryType}. Supported types are: email, phone, firstName.`,
+        received_queryType: queryType
+      });
   }
 
   try {
     const data = await fetchShopifyData(GET_CUSTOMER_DETAILS_QUERY, { queryString });
-    const customer = data.customers.edges[0]?.node;
+    const customer = data?.customers?.edges?.[0]?.node;
 
     if (customer) {
       const formattedCustomer = {
@@ -116,11 +153,11 @@ app.post('/get-customer-details', async (req, res) => {
 
   } catch (error) {
     console.error("Error in /get-customer-details:", error);
-    res.status(500).json({ success: false, error: "Failed to fetch customer details", details: error.message });
+    res.status(500).json({ success: false, error: "Failed to fetch customer details from Shopify.", details: error.message });
   }
 });
 
-
+// Start the server
 app.listen(PORT, () => {
   console.log(`Middleware server running on port ${PORT}`);
 });
