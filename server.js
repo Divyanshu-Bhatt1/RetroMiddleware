@@ -6,9 +6,8 @@ const { fetchShopifyData, GET_ORDER_DETAILS_QUERY, GET_CUSTOMER_DETAILS_QUERY } 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware order is important! express.json() should be before routes.
-app.use(cors()); // Allow all CORS for flexibility during development/deployment
-app.use(express.json()); // Essential for parsing JSON request bodies
+app.use(cors());
+app.use(express.json());
 
 // --- Health Check Endpoint ---
 app.get('/health', (req, res) => {
@@ -28,19 +27,40 @@ const normalizePhoneNumber = (phone) => {
   return `+${digits}`; // Fallback, prepend + to whatever digits remain
 };
 
+// Helper to format dates human-friendly
+const formatDateHuman = (dateString) => {
+    if (!dateString) return 'not yet available';
+    const date = new Date(dateString);
+    // Option 1: Simple format like "May 10th"
+    return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+    // Option 2: More advanced, like "yesterday", "tomorrow", "Friday, May 17th"
+    // For simplicity, we'll stick to a basic readable format here.
+    // Real-world implementation might use a library like 'date-fns' or 'moment'
+};
+
+// Helper to estimate arrival date (very basic, can be improved)
+const estimateArrivalDate = (shippingDateString) => {
+    if (!shippingDateString) return 'not yet available';
+    const shippingDate = new Date(shippingDateString);
+    // Assuming 5-7 business days for delivery
+    const arrivalDate = new Date(shippingDate);
+    arrivalDate.setDate(shippingDate.getDate() + 7); // Add 7 days
+    return arrivalDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+};
+
+
 // --- Endpoint to Get Order Details ---
 app.post('/get-order-details', async (req, res) => {
-  console.log('Received /get-order-details request. Body:', req.body); // LOG THE INCOMING BODY
+  console.log('Received /get-order-details request. Body:', req.body);
 
   const { queryType, value } = req.body;
 
   if (!queryType || !value) {
     console.error("Validation Error: Missing 'queryType' or 'value' in request body.", req.body);
-    // Ensure the error response matches what Retell AI expects to see as an error in its logs
     return res.status(400).json({
       success: false,
       error: "Missing 'queryType' or 'value' in request body. Please provide both.",
-      received_body: req.body // Include received body for debugging
+      received_body: req.body
     });
   }
 
@@ -72,21 +92,64 @@ app.post('/get-order-details', async (req, res) => {
     const order = data?.orders?.edges?.[0]?.node;
 
     if (order) {
+        // --- Process Line Items for a humanized summary ---
+        const lineItems = order.lineItems.edges.map(item => ({
+            title: item.node.title,
+            quantity: item.node.quantity
+        }));
+        let lineItemsSummary = '';
+        if (lineItems.length === 1) {
+            lineItemsSummary = `${lineItems[0].quantity} ${lineItems[0].title}`;
+        } else if (lineItems.length > 1) {
+            lineItemsSummary = `${lineItems.length} items, including the ${lineItems[0].title}`;
+        } else {
+            lineItemsSummary = 'your order';
+        }
+
+        // --- Process Fulfillments for shipping info ---
+        let hasTracking = false;
+        let trackingCompany = 'N/A';
+        let latestFulfillmentStatus = 'UNFULFILLED'; // Default
+        let shippingDate = null;
+        let trackingNumber = null;
+        let trackingUrl = null;
+
+        if (order.fulfillments && order.fulfillments.length > 0) {
+            // Find the most recent fulfillment
+            const latestFulfillment = order.fulfillments[order.fulfillments.length - 1]; // Assuming fulfillments are in chronological order
+            latestFulfillmentStatus = latestFulfillment.status;
+            shippingDate = latestFulfillment.createdAt; // Shopify fulfillment createdAt is the shipping date
+
+            if (latestFulfillment.trackingInfo && latestFulfillment.trackingInfo.length > 0) {
+                const primaryTracking = latestFulfillment.trackingInfo[0];
+                hasTracking = true;
+                trackingNumber = primaryTracking.number;
+                trackingUrl = primaryTracking.url;
+                trackingCompany = primaryTracking.company || 'the carrier';
+            }
+        }
+        
+        // Humanize dates
+        const formattedShippingDate = shippingDate ? formatDateHuman(shippingDate) : 'not yet available';
+        const formattedArrivalDate = shippingDate ? estimateArrivalDate(shippingDate) : 'not yet available';
+
+
       const formattedOrder = {
         orderId: order.id.split('/').pop(),
         orderName: order.name,
         customerEmail: order.email || 'N/A',
         customerPhone: order.phone || 'N/A',
-        lineItems: order.lineItems.edges.map(item => ({
-          title: item.node.title,
-          quantity: item.node.quantity
-        })),
-        fulfillments: order.fulfillments.map(fulfillment => ({
-          status: fulfillment.status,
-          trackingNumber: fulfillment.trackingInfo?.[0]?.number || 'N/A',
-          trackingUrl: fulfillment.trackingInfo?.[0]?.url || 'N/A',
-          trackingCompany: fulfillment.trackingInfo?.[0]?.company || 'N/A'
-        }))
+        lineItemsSummary: lineItemsSummary, // Humanized summary
+        fulfillmentStatus: latestFulfillmentStatus,
+        hasTracking: hasTracking,
+        formattedShippingDate: formattedShippingDate,
+        formattedArrivalDate: formattedArrivalDate,
+        trackingCompany: trackingCompany,
+        // Include raw tracking details, but AI is instructed *not* to read them out unless asked.
+        trackingNumber: trackingNumber,
+        trackingUrl: trackingUrl,
+        // Keep original lineItems for detailed reference if needed, but not for direct read-out
+        rawLineItems: lineItems,
       };
       res.json({ success: true, order: formattedOrder });
     } else {
@@ -99,9 +162,9 @@ app.post('/get-order-details', async (req, res) => {
   }
 });
 
-// --- Endpoint to Get Customer Details ---
+// --- Endpoint to Get Customer Details --- (No changes needed here for this request)
 app.post('/get-customer-details', async (req, res) => {
-  console.log('Received /get-customer-details request. Body:', req.body); // LOG THE INCOMING BODY
+  console.log('Received /get-customer-details request. Body:', req.body);
 
   const { queryType, value } = req.body;
 
