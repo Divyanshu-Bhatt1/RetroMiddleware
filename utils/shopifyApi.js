@@ -51,6 +51,7 @@ const GET_ORDER_DETAILS_QUERY = `
             }
           }
           fulfillments(first: 5) {
+            createdAt # <--- ADDED THIS FIELD
             status
             trackingInfo {
               number
