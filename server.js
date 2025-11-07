@@ -36,7 +36,15 @@ const normalizePhoneNumber = (phone) => {
  * @returns {object} - A clean object with all the necessary order details.
  */
 const formatOrderForAI = (orderNode) => {
-  const latestFulfillment = orderNode.fulfillments?.[0];
+  let latestFulfillment = null;
+  // Check if fulfillments exist and sort them to find the most recent one
+  if (orderNode.fulfillments && orderNode.fulfillments.length > 0) {
+    const sortedFulfillments = [...orderNode.fulfillments].sort((a, b) => 
+      new Date(b.createdAt) - new Date(a.createdAt)
+    );
+    latestFulfillment = sortedFulfillments[0]; // The latest is now the first in the sorted array
+  }
+  
   const shippingAddress = orderNode.shippingAddress;
 
   // Create a simple, speakable summary of the items
@@ -57,17 +65,17 @@ const formatOrderForAI = (orderNode) => {
       shippingAddress.city,
       shippingAddress.provinceCode,
       shippingAddress.zip
-    ].filter(Boolean).join(', '); // Filter out null/empty parts and join
+    ].filter(Boolean).join(', ');
   }
 
   return {
-    orderNumber: orderNode.name, // e.g., "#1001"
+    orderNumber: orderNode.name,
     customerName: [orderNode.customer.firstName, orderNode.customer.lastName].filter(Boolean).join(' ') || 'Valued Customer',
     totalPrice: `${orderNode.totalPriceSet.shopMoney.amount} ${orderNode.totalPriceSet.shopMoney.currencyCode}`,
     
     // Shipping and Fulfillment Details
-    shippingStatus: latestFulfillment?.displayStatus || 'UNFULFILLED', // e.g., "FULFILLED", "IN_TRANSIT"
-    shippingDate: latestFulfillment?.createdAt || null, // ISO string date
+    shippingStatus: latestFulfillment?.displayStatus || 'UNFULFILLED',
+    shippingDate: latestFulfillment?.createdAt || null,
     shippingAddress: fullAddress,
     carrier: latestFulfillment?.trackingInfo?.[0]?.company || 'the shipping carrier',
     
@@ -76,11 +84,12 @@ const formatOrderForAI = (orderNode) => {
     totalItems: lineItems.reduce((sum, item) => sum + item.quantity, 0),
     lineItems: lineItems.map(item => ({ title: item.title, quantity: item.quantity })),
     
-    // Provide tracking info but let the AI decide how to use it (e.g., don't read numbers aloud)
+    // Provide tracking info but let the AI decide how to use it
     trackingNumber: latestFulfillment?.trackingInfo?.[0]?.number || null,
     trackingUrl: latestFulfillment?.trackingInfo?.[0]?.url || null,
   };
 };
+ 
 
 // --- API Endpoints ---
 
