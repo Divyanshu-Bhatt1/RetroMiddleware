@@ -63,7 +63,9 @@ app.post('/get-order-details', async (req, res) => {
   console.log('Received /get-order-details request. Body:', req.body);
 
   const { queryType, value } = req.body;
-
+  console.log(typeof value,`${value}  checking`);
+  console.log(`${{value}}`,value.current_call_number);
+  
   if (!queryType || !value) {
     console.error("Validation Error: Missing 'queryType' or 'value' in request body.", req.body);
     return res.status(400).json({
