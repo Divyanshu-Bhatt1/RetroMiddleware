@@ -1,11 +1,23 @@
 const axios = require('axios');
 
+// Ensure these are set in your .env file
 const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 
+/**
+ * A robust function to call the Shopify GraphQL API.
+ * @param {string} graphqlQuery - The GraphQL query string.
+ * @param {object} variables - The variables for the GraphQL query.
+ * @returns {Promise<object>} - The data from the Shopify API.
+ */
 async function fetchShopifyData(graphqlQuery, variables) {
+  if (!SHOPIFY_STORE_URL || !SHOPIFY_ACCESS_TOKEN) {
+    throw new Error("Shopify URL or Access Token is not defined in environment variables.");
+  }
+
   try {
-    const response = await axios.post(SHOPIFY_STORE_URL,
+    const response = await axios.post(
+      SHOPIFY_STORE_URL,
       { query: graphqlQuery, variables },
       {
         headers: {
@@ -26,22 +38,43 @@ async function fetchShopifyData(graphqlQuery, variables) {
     console.error("Error calling Shopify GraphQL API:", error.message);
     if (error.response) {
       console.error("Shopify API Response Error:", error.response.status, error.response.data);
-      throw new Error(`Shopify API responded with status ${error.response.status}: ${JSON.stringify(error.response.data)}`);
+      throw new Error(`Shopify API responded with status ${error.response.status}`);
     }
-    throw new Error(`Network or unexpected error: ${error.message}`);
+    throw new Error(`Network or unexpected error during Shopify API call: ${error.message}`);
   }
 }
 
-
-const GET_ORDER_DETAILS_QUERY = `
-  query ($queryString: String!) {
-    orders(first: 1, query: $queryString) {
+/**
+ * The single, comprehensive GraphQL query to fetch all necessary order details.
+ * It retrieves order info, customer name, pricing, shipping address, line items,
+ * and the latest fulfillment status and tracking information.
+ */
+const GET_ORDER_QUERY = `
+  query getOrderByQuery($queryString: String!) {
+    orders(first: 1, sortKey: PROCESSED_AT, reverse: true, query: $queryString) {
       edges {
         node {
           id
-          name
-          email
-          phone
+          name # The order number, e.g., #1001
+          processedAt
+          totalPriceSet {
+            shopMoney {
+              amount
+              currencyCode
+            }
+          }
+          customer {
+            firstName
+            lastName
+          }
+          shippingAddress {
+            address1
+            address2
+            city
+            provinceCode
+            zip
+            country
+          }
           lineItems(first: 10) {
             edges {
               node {
@@ -50,13 +83,14 @@ const GET_ORDER_DETAILS_QUERY = `
               }
             }
           }
-          fulfillments(first: 5) {
-            createdAt # <--- ADDED THIS FIELD
-            status
-            trackingInfo {
+          # Get the latest fulfillment to see shipping status
+          fulfillments(first: 1, sortKey: CREATED_AT, reverse: true) {
+            createdAt # This is the shipping date
+            displayStatus # e.g., 'FULFILLED', 'IN_TRANSIT', 'DELIVERED'
+            trackingInfo(first: 1) {
+              company
               number
               url
-              company
             }
           }
         }
@@ -65,27 +99,7 @@ const GET_ORDER_DETAILS_QUERY = `
   }
 `;
 
-
-const GET_CUSTOMER_DETAILS_QUERY = `
-  query ($queryString: String!) {
-    customers(first: 1, query: $queryString) {
-      edges {
-        node {
-          id
-          firstName
-          lastName
-          email
-          phone
-          # Add more customer fields as needed
-        }
-      }
-    }
-  }
-`;
-
-
 module.exports = {
   fetchShopifyData,
-  GET_ORDER_DETAILS_QUERY,
-  GET_CUSTOMER_DETAILS_QUERY
+  GET_ORDER_QUERY
 };
