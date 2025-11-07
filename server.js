@@ -14,35 +14,44 @@ app.get('/health', (req, res) => {
   res.status(200).send('Middleware is running!');
 });
 
-// Helper to normalize phone numbers (remove non-digits and ensure E.164-like format)
+// Helper to normalize phone numbers to E.164 format (+CountryCodeNumber)
+// This is a more universal approach, but still relies on Twilio/Shopify's ability to handle various formats.
+// For truly robust global phone number parsing, a dedicated library like 'libphonenumber-js' is recommended.
 const normalizePhoneNumber = (phone) => {
   if (!phone) return null;
   const digits = phone.replace(/\D/g, ''); // Remove all non-digit characters
-  if (digits.length === 10) { // Assume US number, prepend +1
-    return `+1${digits}`;
+
+  // If the number already starts with '+', assume it's in E.164 or similar format
+  if (phone.startsWith('+')) {
+      return phone;
   }
-  if (digits.length === 11 && digits.startsWith('1')) { // Assume US number with leading 1
-    return `+${digits}`;
+
+  // If it's a very short sequence of digits, it's unlikely a full phone number.
+  // This helps prevent normalizing things like "123" into "+123".
+  if (digits.length < 7) {
+      console.warn(`Attempted to normalize a short digit sequence: "${phone}". Returning as is.`);
+      return phone; // Return as is, let Shopify/GraphQL handle it, or fail later.
   }
-  return `+${digits}`; // Fallback, prepend + to whatever digits remain
+
+  // Common case: user provides a number without a leading '+'
+  // If we can infer a country code (e.g., from an environment variable or context), we could add it.
+  // For now, if no '+' is present, we'll just prepend '+' as a best guess for E.164.
+  // This might not be perfect for all cases (e.g., if Shopify expects a very specific format without '+').
+  // A better solution would involve knowing the expected country of origin or using a library.
+  return `+${digits}`;
 };
 
 // Helper to format dates human-friendly
 const formatDateHuman = (dateString) => {
     if (!dateString) return 'not yet available';
     const date = new Date(dateString);
-    // Option 1: Simple format like "May 10th"
     return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
-    // Option 2: More advanced, like "yesterday", "tomorrow", "Friday, May 17th"
-    // For simplicity, we'll stick to a basic readable format here.
-    // Real-world implementation might use a library like 'date-fns' or 'moment'
 };
 
 // Helper to estimate arrival date (very basic, can be improved)
 const estimateArrivalDate = (shippingDateString) => {
     if (!shippingDateString) return 'not yet available';
     const shippingDate = new Date(shippingDateString);
-    // Assuming 5-7 business days for delivery
     const arrivalDate = new Date(shippingDate);
     arrivalDate.setDate(shippingDate.getDate() + 7); // Add 7 days
     return arrivalDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
@@ -65,18 +74,31 @@ app.post('/get-order-details', async (req, res) => {
   }
 
   let queryString;
+  let queryValue = value; // Use a variable for the actual value to be queried
+
+  // Defensive check: If the AI is literally passing the variable name, reject it here.
+  if (typeof value === 'string' && (value.includes('current_call_number') || value.includes('{{'))) {
+      console.error(`Rejected query: AI passed variable literal '${value}' instead of its value.`);
+      return res.json({ success: false, message: `Invalid input provided. Please try again with a valid order number, email, or phone number.` });
+  }
+
   switch (queryType) {
     case 'name': // Shopify order number
-      queryString = `name:${value.replace('#', '')}`; // Remove '#' if present
+      queryString = `name:${queryValue.replace('#', '')}`; // Remove '#' if present
       break;
     case 'phone':
-      queryString = `phone:${normalizePhoneNumber(value)}`;
+      queryValue = normalizePhoneNumber(value);
+      if (!queryValue) { // If normalization results in null (e.g., empty input)
+          console.error(`Normalized phone number is null for input: ${value}`);
+          return res.json({ success: false, message: `Invalid phone number format provided.` });
+      }
+      queryString = `phone:${queryValue}`;
       break;
     case 'email':
-      queryString = `email:${value}`;
+      queryString = `email:${queryValue}`;
       break;
     case 'id': // Shopify GID
-      queryString = `id:${value}`;
+      queryString = `id:${queryValue}`;
       break;
     default:
       console.error(`Invalid queryType: ${queryType}. Supported: name, phone, email, id.`);
@@ -92,7 +114,6 @@ app.post('/get-order-details', async (req, res) => {
     const order = data?.orders?.edges?.[0]?.node;
 
     if (order) {
-        // --- Process Line Items for a humanized summary ---
         const lineItems = order.lineItems.edges.map(item => ({
             title: item.node.title,
             quantity: item.node.quantity
@@ -106,19 +127,17 @@ app.post('/get-order-details', async (req, res) => {
             lineItemsSummary = 'your order';
         }
 
-        // --- Process Fulfillments for shipping info ---
         let hasTracking = false;
         let trackingCompany = 'N/A';
-        let latestFulfillmentStatus = 'UNFULFILLED'; // Default
+        let latestFulfillmentStatus = 'UNFULFILLED';
         let shippingDate = null;
         let trackingNumber = null;
         let trackingUrl = null;
 
         if (order.fulfillments && order.fulfillments.length > 0) {
-            // Find the most recent fulfillment
-            const latestFulfillment = order.fulfillments[order.fulfillments.length - 1]; // Assuming fulfillments are in chronological order
+            const latestFulfillment = order.fulfillments[order.fulfillments.length - 1];
             latestFulfillmentStatus = latestFulfillment.status;
-            shippingDate = latestFulfillment.createdAt; // Shopify fulfillment createdAt is the shipping date
+            shippingDate = latestFulfillment.createdAt;
 
             if (latestFulfillment.trackingInfo && latestFulfillment.trackingInfo.length > 0) {
                 const primaryTracking = latestFulfillment.trackingInfo[0];
@@ -129,7 +148,6 @@ app.post('/get-order-details', async (req, res) => {
             }
         }
         
-        // Humanize dates
         const formattedShippingDate = shippingDate ? formatDateHuman(shippingDate) : 'not yet available';
         const formattedArrivalDate = shippingDate ? estimateArrivalDate(shippingDate) : 'not yet available';
 
@@ -139,20 +157,19 @@ app.post('/get-order-details', async (req, res) => {
         orderName: order.name,
         customerEmail: order.email || 'N/A',
         customerPhone: order.phone || 'N/A',
-        lineItemsSummary: lineItemsSummary, // Humanized summary
+        lineItemsSummary: lineItemsSummary,
         fulfillmentStatus: latestFulfillmentStatus,
         hasTracking: hasTracking,
         formattedShippingDate: formattedShippingDate,
         formattedArrivalDate: formattedArrivalDate,
         trackingCompany: trackingCompany,
-        // Include raw tracking details, but AI is instructed *not* to read them out unless asked.
         trackingNumber: trackingNumber,
         trackingUrl: trackingUrl,
-        // Keep original lineItems for detailed reference if needed, but not for direct read-out
         rawLineItems: lineItems,
       };
       res.json({ success: true, order: formattedOrder });
     } else {
+      // Explicitly return success: false and a clear message for no order found
       res.json({ success: false, message: `No order found for ${queryType}: ${value}` });
     }
 
@@ -162,7 +179,7 @@ app.post('/get-order-details', async (req, res) => {
   }
 });
 
-// --- Endpoint to Get Customer Details --- (No changes needed here for this request)
+// --- Endpoint to Get Customer Details ---
 app.post('/get-customer-details', async (req, res) => {
   console.log('Received /get-customer-details request. Body:', req.body);
 
@@ -178,15 +195,28 @@ app.post('/get-customer-details', async (req, res) => {
   }
 
   let queryString;
+  let queryValue = value;
+
+  // Defensive check: If the AI is literally passing the variable name, reject it here.
+  if (typeof value === 'string' && (value.includes('current_call_number') || value.includes('{{'))) {
+      console.error(`Rejected query: AI passed variable literal '${value}' instead of its value.`);
+      return res.json({ success: false, message: `Invalid input provided. Please try again with a valid email or phone number.` });
+  }
+
   switch (queryType) {
     case 'email':
-      queryString = `email:${value}`;
+      queryString = `email:${queryValue}`;
       break;
     case 'phone':
-      queryString = `phone:${normalizePhoneNumber(value)}`;
+      queryValue = normalizePhoneNumber(value);
+      if (!queryValue) {
+          console.error(`Normalized phone number is null for input: ${value}`);
+          return res.json({ success: false, message: `Invalid phone number format provided.` });
+      }
+      queryString = `phone:${queryValue}`;
       break;
-    case 'firstName':
-      queryString = `first_name:${value}`;
+    case 'firstName': // Note: Shopify customer search by first_name alone might be less reliable
+      queryString = `first_name:${queryValue}`;
       break;
     default:
       console.error(`Invalid queryType: ${queryType}. Supported: email, phone, firstName.`);
