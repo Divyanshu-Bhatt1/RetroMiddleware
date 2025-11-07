@@ -77,10 +77,13 @@ app.post('/get-order-details', async (req, res) => {
   let queryValue = value; // Use a variable for the actual value to be queried
 
   // Defensive check: If the AI is literally passing the variable name, reject it here.
-  if (typeof value === 'string' && (value.includes('current_call_number') || value.includes('{{'))) {
-      console.error(`Rejected query: AI passed variable literal '${value}' instead of its value.`);
-      return res.json({ success: false, message: `Invalid input provided. Please try again with a valid order number, email, or phone number.` });
-  }
+  // if (typeof value === 'string' && (value.includes('current_call_number') || value.includes('{{'))) {
+  //     console.error(`Rejected query: AI passed variable literal '${value}' instead of its value.`);
+  //     return res.json({ success: false, message: `Invalid input provided. Please try again with a valid order number, email, or phone number.` });
+  // }
+
+ console.log(value, " string or not ", value === 'string');
+
 
   switch (queryType) {
     case 'name': // Shopify order number
