@@ -55,7 +55,7 @@ const GET_ORDER_QUERY = `
       edges {
         node {
           id
-          name # The order number, e.g., #1001
+          name
           processedAt
           totalPriceSet {
             shopMoney {
@@ -83,10 +83,10 @@ const GET_ORDER_QUERY = `
               }
             }
           }
-          # Get the latest fulfillment to see shipping status
-          fulfillments(first: 1, sortKey: CREATED_AT, reverse: true) {
-            createdAt # This is the shipping date
-            displayStatus # e.g., 'FULFILLED', 'IN_TRANSIT', 'DELIVERED'
+          # Fetch recent fulfillments (we will sort them in the backend)
+          fulfillments(first: 5) { # <-- THIS IS THE FIX
+            createdAt
+            displayStatus
             trackingInfo(first: 1) {
               company
               number
@@ -98,6 +98,7 @@ const GET_ORDER_QUERY = `
     }
   }
 `;
+
 
 module.exports = {
   fetchShopifyData,
