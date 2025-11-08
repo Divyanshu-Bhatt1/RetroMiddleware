@@ -1,6 +1,6 @@
 const axios = require('axios');
 
-// Ensure these are set in your .env file
+// Ensure these are set in your environment variables
 const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 
@@ -45,86 +45,84 @@ async function fetchShopifyData(graphqlQuery, variables) {
 }
 
 /**
- * The single, comprehensive GraphQL query to fetch all necessary order details.
- * It retrieves order info, customer name, pricing, shipping address, line items,
- * and the latest fulfillment status and tracking information.
+ * The single, comprehensive GraphQL query to find a customer by their phone number
+ * and then retrieve their most recent order along with all necessary details.
+ * This is a more reliable method than querying orders directly by phone.
  */
-// const GET_ORDER_QUERY = `
-//   query getOrderByQuery($queryString: String!) {
-//     orders(first: 1, sortKey: PROCESSED_AT, reverse: true, query: $queryString) {
-//       edges {
-//         node {
-//           id
-//           name
-//           processedAt
-//           totalPriceSet {
-//             shopMoney {
-//               amount
-//               currencyCode
-//             }
-//           }
-//           customer {
-//             firstName
-//             lastName
-//           }
-//           shippingAddress {
-//             address1
-//             address2
-//             city
-//             provinceCode
-//             zip
-//             country
-//           }
-//           lineItems(first: 10) {
-//             edges {
-//               node {
-//                 title
-//                 quantity
-//               }
-//             }
-//           }
-//           # Fetch recent fulfillments (we will sort them in the backend)
-//           fulfillments(first: 5) { # <-- THIS IS THE FIX
-//             createdAt
-//             displayStatus
-//             trackingInfo(first: 1) {
-//               company
-//               number
-//               url
-//             }
-//           }
-//         }
-//       }
-//     }
-//   }
-// `;
+const GET_LATEST_ORDER_BY_CUSTOMER_PHONE_QUERY = `
+  query getCustomerAndLastOrderByPhone($phoneQuery: String!) {
+    customers(first: 1, query: $phoneQuery) {
+      edges {
+        node {
+          # Get customer details for context
+          firstName
+          lastName
+          phone
+          # Now, get the LATEST order belonging to this customer
+          orders(first: 1, sortKey: PROCESSED_AT, reverse: true) {
+            edges {
+              node {
+                id
+                name # This is the order number like #1001
+                processedAt
+                totalPriceSet {
+                  shopMoney {
+                    amount
+                    currencyCode
+                  }
+                }
+                shippingAddress {
+                  address1
+                  address2
+                  city
+                  provinceCode
+                  zip
+                  country
+                }
+                lineItems(first: 10) {
+                  edges {
+                    node {
+                      title
+                      quantity
+                    }
+                  }
+                }
+                fulfillments(first: 5, sortKey: CREATED_AT, reverse: true) {
+                  createdAt
+                  displayStatus
+                  trackingInfo(first: 1) {
+                    company
+                    number
+                    url
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
 
-
-// module.exports = {
-//   fetchShopifyData,
-//   GET_ORDER_QUERY
-// };
-
-// In utils/shopifyApi.js
-
-const GET_ORDER_QUERY = `
-  query getOrderByQuery($queryString: String!) {
-    orders(first: 1, sortKey: PROCESSED_AT, reverse: true, query: $queryString) {
+// A separate, simpler query for getting an order by its number (name)
+const GET_ORDER_BY_ID_QUERY = `
+  query getOrderById($nameQuery: String!) {
+    orders(first: 1, query: $nameQuery) {
       edges {
         node {
           id
           name
           processedAt
+          customer {
+            firstName
+            lastName
+          }
           totalPriceSet {
             shopMoney {
               amount
               currencyCode
             }
-          }
-          customer {
-            firstName
-            lastName
-            phone # <-- ADD THIS LINE
           }
           shippingAddress {
             address1
@@ -142,7 +140,7 @@ const GET_ORDER_QUERY = `
               }
             }
           }
-          fulfillments(first: 5) {
+          fulfillments(first: 5, sortKey: CREATED_AT, reverse: true) {
             createdAt
             displayStatus
             trackingInfo(first: 1) {
@@ -157,7 +155,9 @@ const GET_ORDER_QUERY = `
   }
 `;
 
+
 module.exports = {
   fetchShopifyData,
-  GET_ORDER_QUERY
+  GET_LATEST_ORDER_BY_CUSTOMER_PHONE_QUERY,
+  GET_ORDER_BY_ID_QUERY
 };
