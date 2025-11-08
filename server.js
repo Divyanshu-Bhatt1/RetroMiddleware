@@ -96,6 +96,36 @@ const formatOrderForAI = (orderNode) => {
 /**
  * Fetches the latest order for a given phone number.
  */
+// app.post('/getOrderByPhone', async (req, res) => {
+//   const { phone } = req.body;
+//   console.log(`Received request for /getOrderByPhone with phone: ${phone}`);
+
+//   if (!phone) {
+//     return res.status(400).json({ success: false, error: "Phone number is required." });
+//   }
+
+//   const normalizedPhone = normalizePhoneNumber(phone);
+//   if (!normalizedPhone) {
+//     return res.status(400).json({ success: false, error: `Invalid phone number format provided: ${phone}` });
+//   }
+
+//   try {
+//     const data = await fetchShopifyData(GET_ORDER_QUERY, { queryString: `phone:${normalizedPhone}` });
+//     const order = data?.orders?.edges?.[0]?.node;
+
+//     if (order) {
+//       const formattedOrder = formatOrderForAI(order);
+//       res.json({ success: true, order: formattedOrder });
+//     } else {
+//       res.json({ success: false, message: `I couldn't find any recent orders associated with that phone number.` });
+//     }
+//   } catch (error) {
+//     console.error("Error in /getOrderByPhone:", error.message);
+//     res.status(500).json({ success: false, error: "An internal error occurred while fetching order details." });
+//   }
+// });
+
+
 app.post('/getOrderByPhone', async (req, res) => {
   const { phone } = req.body;
   console.log(`Received request for /getOrderByPhone with phone: ${phone}`);
@@ -113,18 +143,27 @@ app.post('/getOrderByPhone', async (req, res) => {
     const data = await fetchShopifyData(GET_ORDER_QUERY, { queryString: `phone:${normalizedPhone}` });
     const order = data?.orders?.edges?.[0]?.node;
 
-    if (order) {
+    // --- START OF THE FIX ---
+    // CRITICAL: Verify that the returned order's phone number matches the queried number.
+    // This prevents returning the latest store order when no match is found.
+    const returnedPhone = order?.customer?.phone ? normalizePhoneNumber(order.customer.phone) : null;
+
+    if (order && returnedPhone === normalizedPhone) {
+      // It's a true match, proceed to format and send the order.
       const formattedOrder = formatOrderForAI(order);
       res.json({ success: true, order: formattedOrder });
     } else {
+      // This is NOT a match (or no order was found), so return a 'not found' message.
+      console.log(`No matching order found for phone ${normalizedPhone}. Shopify may have returned a non-matching result.`);
       res.json({ success: false, message: `I couldn't find any recent orders associated with that phone number.` });
     }
+    // --- END OF THE FIX ---
+
   } catch (error) {
     console.error("Error in /getOrderByPhone:", error.message);
     res.status(500).json({ success: false, error: "An internal error occurred while fetching order details." });
   }
 });
-
 /**
  * Fetches an order by its order number (e.g., "#1001" or "1001").
  */
