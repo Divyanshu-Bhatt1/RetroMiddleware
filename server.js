@@ -152,11 +152,4 @@ app.listen(PORT, () => {
   console.log(`Middleware server running on http://localhost:${PORT}`);
 });```
 
-### Why This Fix Works
 
-1.  **Correct Entry Point:** Instead of searching through all `orders`, we now start by searching the `customers`. Finding a customer by a unique phone number is a much more precise and reliable query in Shopify.
-2.  **No False Positives:** If no customer exists with the provided phone number, the API will simply return nothing. It won't fall back to giving you a random recent order from the store.
-3.  **Guaranteed Correct Order:** Once the correct customer is found, the query then asks for *that specific customer's* most recent order (`orders(first: 1, sortKey: PROCESSED_AT, reverse: true)`). This ensures you always get the right order for the right person.
-4.  **Efficiency:** This is all done in a single, efficient GraphQL API call. We are not making multiple requests.
-
-This new structure is the correct and robust way to handle this lookup and will resolve the issue of failing to find orders by phone number.
