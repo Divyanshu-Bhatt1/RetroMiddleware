@@ -49,6 +49,64 @@ async function fetchShopifyData(graphqlQuery, variables) {
  * It retrieves order info, customer name, pricing, shipping address, line items,
  * and the latest fulfillment status and tracking information.
  */
+// const GET_ORDER_QUERY = `
+//   query getOrderByQuery($queryString: String!) {
+//     orders(first: 1, sortKey: PROCESSED_AT, reverse: true, query: $queryString) {
+//       edges {
+//         node {
+//           id
+//           name
+//           processedAt
+//           totalPriceSet {
+//             shopMoney {
+//               amount
+//               currencyCode
+//             }
+//           }
+//           customer {
+//             firstName
+//             lastName
+//           }
+//           shippingAddress {
+//             address1
+//             address2
+//             city
+//             provinceCode
+//             zip
+//             country
+//           }
+//           lineItems(first: 10) {
+//             edges {
+//               node {
+//                 title
+//                 quantity
+//               }
+//             }
+//           }
+//           # Fetch recent fulfillments (we will sort them in the backend)
+//           fulfillments(first: 5) { # <-- THIS IS THE FIX
+//             createdAt
+//             displayStatus
+//             trackingInfo(first: 1) {
+//               company
+//               number
+//               url
+//             }
+//           }
+//         }
+//       }
+//     }
+//   }
+// `;
+
+
+// module.exports = {
+//   fetchShopifyData,
+//   GET_ORDER_QUERY
+// };
+
+// In utils/shopifyApi.js
+
 const GET_ORDER_QUERY = `
   query getOrderByQuery($queryString: String!) {
     orders(first: 1, sortKey: PROCESSED_AT, reverse: true, query: $queryString) {
@@ -66,6 +124,7 @@ const GET_ORDER_QUERY = `
           customer {
             firstName
             lastName
+            phone # <-- ADD THIS LINE
           }
           shippingAddress {
             address1
@@ -83,8 +142,7 @@ const GET_ORDER_QUERY = `
               }
             }
           }
-          # Fetch recent fulfillments (we will sort them in the backend)
-          fulfillments(first: 5) { # <-- THIS IS THE FIX
+          fulfillments(first: 5) {
             createdAt
             displayStatus
             trackingInfo(first: 1) {
@@ -98,7 +156,6 @@ const GET_ORDER_QUERY = `
     }
   }
 `;
-
 
 module.exports = {
   fetchShopifyData,
