@@ -6,9 +6,6 @@ const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 
 /**
  * A robust function to call the Shopify GraphQL API.
- * @param {string} graphqlQuery - The GraphQL query string.
- * @param {object} variables - The variables for the GraphQL query.
- * @returns {Promise<object>} - The data from the Shopify API.
  */
 async function fetchShopifyData(graphqlQuery, variables) {
   if (!SHOPIFY_STORE_URL || !SHOPIFY_ACCESS_TOKEN) {
@@ -45,56 +42,30 @@ async function fetchShopifyData(graphqlQuery, variables) {
 }
 
 /**
- * The single, comprehensive GraphQL query to find a customer by their phone number
- * and then retrieve their most recent order along with all necessary details.
- * This is a more reliable method than querying orders directly by phone.
+ * RELIABLE QUERY: Finds a customer by phone, then gets their most recent order.
  */
 const GET_LATEST_ORDER_BY_CUSTOMER_PHONE_QUERY = `
   query getCustomerAndLastOrderByPhone($phoneQuery: String!) {
     customers(first: 1, query: $phoneQuery) {
       edges {
         node {
-          # Get customer details for context
           firstName
           lastName
           phone
-          # Now, get the LATEST order belonging to this customer
           orders(first: 1, sortKey: PROCESSED_AT, reverse: true) {
             edges {
               node {
                 id
-                name # This is the order number like #1001
+                name
                 processedAt
-                totalPriceSet {
-                  shopMoney {
-                    amount
-                    currencyCode
-                  }
-                }
-                shippingAddress {
-                  address1
-                  address2
-                  city
-                  provinceCode
-                  zip
-                  country
-                }
-                lineItems(first: 10) {
-                  edges {
-                    node {
-                      title
-                      quantity
-                    }
-                  }
-                }
-                fulfillments(first: 5, sortKey: CREATED_AT, reverse: true) {
+                totalPriceSet { shopMoney { amount currencyCode } }
+                shippingAddress { address1, city, provinceCode, zip, country }
+                lineItems(first: 10) { edges { node { title, quantity } } }
+                # FIX: Removed sortKey and reverse from here. We will sort in the backend.
+                fulfillments(first: 5) {
                   createdAt
                   displayStatus
-                  trackingInfo(first: 1) {
-                    company
-                    number
-                    url
-                  }
+                  trackingInfo(first: 1) { company, number, url }
                 }
               }
             }
@@ -105,7 +76,9 @@ const GET_LATEST_ORDER_BY_CUSTOMER_PHONE_QUERY = `
   }
 `;
 
-// A separate, simpler query for getting an order by its number (name)
+/**
+ * STANDARD QUERY: Finds an order by its number (e.g., #1001).
+ */
 const GET_ORDER_BY_ID_QUERY = `
   query getOrderById($nameQuery: String!) {
     orders(first: 1, query: $nameQuery) {
@@ -114,40 +87,15 @@ const GET_ORDER_BY_ID_QUERY = `
           id
           name
           processedAt
-          customer {
-            firstName
-            lastName
-          }
-          totalPriceSet {
-            shopMoney {
-              amount
-              currencyCode
-            }
-          }
-          shippingAddress {
-            address1
-            address2
-            city
-            provinceCode
-            zip
-            country
-          }
-          lineItems(first: 10) {
-            edges {
-              node {
-                title
-                quantity
-              }
-            }
-          }
-          fulfillments(first: 5, sortKey: CREATED_AT, reverse: true) {
+          customer { firstName, lastName }
+          totalPriceSet { shopMoney { amount, currencyCode } }
+          shippingAddress { address1, city, provinceCode, zip, country }
+          lineItems(first: 10) { edges { node { title, quantity } } }
+          # FIX: Removed sortKey and reverse from here as well.
+          fulfillments(first: 5) {
             createdAt
             displayStatus
-            trackingInfo(first: 1) {
-              company
-              number
-              url
-            }
+            trackingInfo(first: 1) { company, number, url }
           }
         }
       }
