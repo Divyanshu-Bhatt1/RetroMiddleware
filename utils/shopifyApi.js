@@ -1,3 +1,4 @@
+
 const axios = require('axios');
 
 // Ensure these are set in your environment variables
@@ -42,9 +43,74 @@ async function fetchShopifyData(graphqlQuery, variables) {
 }
 
 /**
- * RELIABLE QUERY: Finds a customer by phone, then gets their most recent order.
+ * UPGRADED: GraphQL Fragment now includes data for per-item fulfillment status.
+ */
+const ORDER_FRAGMENT = `
+  fragment OrderFragment on Order {
+    id
+    name 
+    processedAt # This is the Order Placed Date
+    displayFinancialStatus
+    displayFulfillmentStatus
+    
+    # Pricing Details
+    subtotalPriceSet { shopMoney { amount, currencyCode } }
+    totalTaxSet { shopMoney { amount, currencyCode } }
+    totalShippingPriceSet { shopMoney { amount, currencyCode } }
+    totalPriceSet { shopMoney { amount, currencyCode } }
+
+    # Shipping Details
+    shippingAddress {
+      address1
+      address2
+      city
+      provinceCode
+      zip
+      country
+    }
+    
+    # All Line Items (up to 250 per order)
+    lineItems(first: 250) {
+      edges {
+        node {
+          id # NEW: We need the ID to track fulfillment status
+          title
+          quantity
+          variant { title }
+          originalUnitPriceSet { shopMoney { amount, currencyCode } }
+          discountedTotalSet { shopMoney { amount, currencyCode } }
+        }
+      }
+    }
+    
+    # Fulfillments for tracking and per-item status
+    fulfillments(first: 10) {
+      createdAt # This is the Shipping Date for this fulfillment
+      displayStatus
+      trackingInfo(first: 1) {
+        company
+        number
+        url
+      }
+      # NEW: This block gets the specific items included in THIS fulfillment
+      fulfillmentLineItems(first: 100) {
+        edges {
+          node {
+            lineItem {
+              id # The ID of the original line item
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+/**
+ * UPDATED QUERY: Finds a customer by phone, then gets their most recent order.
  */
 const GET_LATEST_ORDER_BY_CUSTOMER_PHONE_QUERY = `
+  ${ORDER_FRAGMENT}
   query getCustomerAndLastOrderByPhone($phoneQuery: String!) {
     customers(first: 1, query: $phoneQuery) {
       edges {
@@ -55,18 +121,7 @@ const GET_LATEST_ORDER_BY_CUSTOMER_PHONE_QUERY = `
           orders(first: 1, sortKey: PROCESSED_AT, reverse: true) {
             edges {
               node {
-                id
-                name
-                processedAt
-                totalPriceSet { shopMoney { amount currencyCode } }
-                shippingAddress { address1, city, provinceCode, zip, country }
-                lineItems(first: 10) { edges { node { title, quantity } } }
-                # FIX: Removed sortKey and reverse from here. We will sort in the backend.
-                fulfillments(first: 5) {
-                  createdAt
-                  displayStatus
-                  trackingInfo(first: 1) { company, number, url }
-                }
+                ...OrderFragment
               }
             }
           }
@@ -77,32 +132,24 @@ const GET_LATEST_ORDER_BY_CUSTOMER_PHONE_QUERY = `
 `;
 
 /**
- * STANDARD QUERY: Finds an order by its number (e.g., #1001).
+ * UPDATED QUERY: Finds an order by its number (e.g., #1001).
  */
 const GET_ORDER_BY_ID_QUERY = `
+  ${ORDER_FRAGMENT}
   query getOrderById($nameQuery: String!) {
     orders(first: 1, query: $nameQuery) {
       edges {
         node {
-          id
-          name
-          processedAt
-          customer { firstName, lastName }
-          totalPriceSet { shopMoney { amount, currencyCode } }
-          shippingAddress { address1, city, provinceCode, zip, country }
-          lineItems(first: 10) { edges { node { title, quantity } } }
-          # FIX: Removed sortKey and reverse from here as well.
-          fulfillments(first: 5) {
-            createdAt
-            displayStatus
-            trackingInfo(first: 1) { company, number, url }
+          customer {
+            firstName
+            lastName
           }
+          ...OrderFragment
         }
       }
     }
   }
 `;
-
 
 module.exports = {
   fetchShopifyData,

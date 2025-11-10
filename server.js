@@ -1,3 +1,4 @@
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -24,46 +25,88 @@ const normalizePhoneNumber = (phone) => {
   return phone.startsWith('+') ? phone : `+${digits}`;
 };
 
+const formatMoney = (moneySet) => {
+    if (!moneySet?.shopMoney?.amount) return null;
+    const { amount, currencyCode } = moneySet.shopMoney;
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: currencyCode }).format(amount);
+};
+
 /**
- * Formats a raw Shopify order object into a clean, AI-friendly format.
+ * FINAL VERSION: Formats a raw Shopify order object with per-item fulfillment status.
  */
 const formatOrderForAI = (orderNode, customerNode) => {
-  let latestFulfillment = null;
-  if (orderNode.fulfillments && orderNode.fulfillments.length > 0) {
-    const sortedFulfillments = [...orderNode.fulfillments].sort((a, b) =>
-      new Date(b.createdAt) - new Date(a.createdAt)
-    );
-    latestFulfillment = sortedFulfillments[0];
-  }
+  const latestFulfillment = orderNode.fulfillments?.length > 0
+    ? [...orderNode.fulfillments].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0]
+    : null;
 
-  const shippingAddress = orderNode.shippingAddress;
-  const lineItems = orderNode.lineItems.edges.map(edge => edge.node);
-  const itemsSummary = lineItems.length > 1 ? `${lineItems.length} items, including a ${lineItems[0].title}` : `${lineItems[0].quantity} of the ${lineItems[0].title}`;
-  const customerName = (customerNode?.firstName || orderNode?.customer?.firstName) ? [customerNode?.firstName || orderNode.customer.firstName, customerNode?.lastName || orderNode.customer.lastName].filter(Boolean).join(' ') : 'Valued Customer';
+  // NEW: Create a set of all line item IDs that have been fulfilled.
+  const fulfilledLineItemIds = new Set();
+  orderNode.fulfillments.forEach(fulfillment => {
+    fulfillment.fulfillmentLineItems.edges.forEach(({ node }) => {
+      fulfilledLineItemIds.add(node.lineItem.id);
+    });
+  });
+
+  // Process all line items, adding their individual fulfillment status.
+  const lineItems = orderNode.lineItems.edges.map(({ node }) => ({
+    name: node.title,
+    variant: node.variant?.title || 'Default',
+    quantity: node.quantity,
+    unitPrice: formatMoney(node.originalUnitPriceSet),
+    totalPrice: formatMoney(node.discountedTotalSet),
+    // NEW: Add the fulfillment status for this specific item
+    fulfillmentStatus: fulfilledLineItemIds.has(node.id) ? 'FULFILLED' : 'UNFULFILLED'
+  }));
+
+  const itemsSummary = lineItems.length > 1
+    ? `${lineItems[0].quantity}x ${lineItems[0].name} and ${lineItems.length - 1} other item(s)`
+    : `${lineItems[0].quantity}x ${lineItems[0].name}`;
+
+  const customerName = (customerNode?.firstName || orderNode?.customer?.firstName)
+    ? [customerNode?.firstName || orderNode.customer.firstName, customerNode?.lastName || orderNode.customer.lastName].filter(Boolean).join(' ')
+    : 'Valued Customer';
   
-  let fullAddress = null;
-  if (shippingAddress) {
-    fullAddress = [
-      shippingAddress.address1,
-      shippingAddress.city,
-      shippingAddress.provinceCode,
-      shippingAddress.zip
-    ].filter(Boolean).join(', ');
-  }
+  const shippingAddress = orderNode.shippingAddress
+    ? [
+        orderNode.shippingAddress.address1,
+        orderNode.shippingAddress.address2,
+        orderNode.shippingAddress.city,
+        orderNode.shippingAddress.provinceCode,
+        orderNode.shippingAddress.zip
+      ].filter(Boolean).join(', ')
+    : null;
 
   return {
     orderNumber: orderNode.name,
+    orderDate: orderNode.processedAt, // NEW: The date the order was placed
     customerName: customerName,
-    shippingStatus: latestFulfillment?.displayStatus || 'UNFULFILLED',
-    shippingDate: latestFulfillment?.createdAt || null, // <-- RESTORED
-    shippingAddress: fullAddress,                       // <-- RESTORED
-    carrier: latestFulfillment?.trackingInfo?.[0]?.company || null,
+    
+    status: {
+        financial: orderNode.displayFinancialStatus,
+        fulfillment: orderNode.displayFulfillmentStatus, // Overall order status
+    },
+
+    pricing: {
+        subtotal: formatMoney(orderNode.subtotalPriceSet),
+        tax: formatMoney(orderNode.totalTaxSet),
+        shipping: formatMoney(orderNode.totalShippingPriceSet),
+        total: formatMoney(orderNode.totalPriceSet),
+    },
+    
+    items: lineItems, // Now includes per-item status
     itemsSummary: itemsSummary,
-    trackingNumber: latestFulfillment?.trackingInfo?.[0]?.number || null,
+
+    shipping: {
+        address: shippingAddress,
+        shippedOnDate: latestFulfillment?.createdAt || null, // NEW: The date of the latest shipment
+        carrier: latestFulfillment?.trackingInfo?.[0]?.company || null,
+        trackingNumber: latestFulfillment?.trackingInfo?.[0]?.number || null,
+        trackingUrl: latestFulfillment?.trackingInfo?.[0]?.url || null,
+    }
   };
 };
 
-// --- API Endpoints ---
+// --- API Endpoints (No changes needed here) ---
 
 app.post('/getOrderByPhone', async (req, res) => {
   const { phone } = req.body;
@@ -103,7 +146,7 @@ app.post('/getOrderById', async (req, res) => {
     if (order) {
       res.json({ success: true, order: formatOrderForAI(order, null) });
     } else {
-      res.json({ success: false, message: `I couldn't find an order with the number ${cleanOrderNumber}.` });
+      res.json({ success: false, message: `I couldn't find an order with the number ${cleanOrderNumber}` });
     }
   } catch (error) {
     console.error("Error in /getOrderById:", error.message);
