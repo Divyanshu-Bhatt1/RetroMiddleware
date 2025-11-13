@@ -1,3 +1,4 @@
+// utils/shopifyApi.js
 
 const axios = require('axios');
 
@@ -5,9 +6,6 @@ const axios = require('axios');
 const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 
-/**
- * A robust function to call the Shopify GraphQL API.
- */
 async function fetchShopifyData(graphqlQuery, variables) {
   if (!SHOPIFY_STORE_URL || !SHOPIFY_ACCESS_TOKEN) {
     throw new Error("Shopify URL or Access Token is not defined in environment variables.");
@@ -42,24 +40,19 @@ async function fetchShopifyData(graphqlQuery, variables) {
   }
 }
 
-/**
- * UPGRADED: GraphQL Fragment now includes data for per-item fulfillment status.
- */
 const ORDER_FRAGMENT = `
   fragment OrderFragment on Order {
     id
     name 
-    processedAt # This is the Order Placed Date
+    processedAt
     displayFinancialStatus
     displayFulfillmentStatus
-    
-    # Pricing Details
+    tags
     subtotalPriceSet { shopMoney { amount, currencyCode } }
     totalTaxSet { shopMoney { amount, currencyCode } }
     totalShippingPriceSet { shopMoney { amount, currencyCode } }
     totalPriceSet { shopMoney { amount, currencyCode } }
-
-    # Shipping Details
+    totalDiscountsSet { shopMoney { amount, currencyCode } }
     shippingAddress {
       address1
       address2
@@ -68,36 +61,45 @@ const ORDER_FRAGMENT = `
       zip
       country
     }
-    
-    # All Line Items (up to 250 per order)
     lineItems(first: 250) {
       edges {
         node {
-          id # NEW: We need the ID to track fulfillment status
+          id
           title
           quantity
-          variant { title }
+          requiresShipping
+          variant { 
+            title 
+            product {
+              productType
+            }
+          }
           originalUnitPriceSet { shopMoney { amount, currencyCode } }
           discountedTotalSet { shopMoney { amount, currencyCode } }
+          discountAllocations {
+            allocatedAmountSet {
+              shopMoney {
+                amount
+                currencyCode
+              }
+            }
+          }
         }
       }
     }
-    
-    # Fulfillments for tracking and per-item status
     fulfillments(first: 10) {
-      createdAt # This is the Shipping Date for this fulfillment
+      createdAt
       displayStatus
       trackingInfo(first: 1) {
         company
         number
         url
       }
-      # NEW: This block gets the specific items included in THIS fulfillment
       fulfillmentLineItems(first: 100) {
         edges {
           node {
             lineItem {
-              id # The ID of the original line item
+              id
             }
           }
         }
@@ -106,9 +108,6 @@ const ORDER_FRAGMENT = `
   }
 `;
 
-/**
- * UPDATED QUERY: Finds a customer by phone, then gets their most recent order.
- */
 const GET_LATEST_ORDER_BY_CUSTOMER_PHONE_QUERY = `
   ${ORDER_FRAGMENT}
   query getCustomerAndLastOrderByPhone($phoneQuery: String!) {
@@ -131,9 +130,6 @@ const GET_LATEST_ORDER_BY_CUSTOMER_PHONE_QUERY = `
   }
 `;
 
-/**
- * UPDATED QUERY: Finds an order by its number (e.g., #1001).
- */
 const GET_ORDER_BY_ID_QUERY = `
   ${ORDER_FRAGMENT}
   query getOrderById($nameQuery: String!) {
