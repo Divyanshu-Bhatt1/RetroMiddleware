@@ -48,6 +48,12 @@ const ORDER_FRAGMENT = `
     displayFinancialStatus
     displayFulfillmentStatus
     tags
+    customer { 
+      firstName
+      lastName
+      email
+      phone
+    }
     subtotalPriceSet { shopMoney { amount, currencyCode } }
     totalTaxSet { shopMoney { amount, currencyCode } }
     totalShippingPriceSet { shopMoney { amount, currencyCode } }
@@ -116,7 +122,7 @@ const GET_LATEST_ORDER_BY_CUSTOMER_PHONE_QUERY = `
         node {
           firstName
           lastName
-          phone
+          email 
           orders(first: 1, sortKey: PROCESSED_AT, reverse: true) {
             edges {
               node {
@@ -136,10 +142,7 @@ const GET_ORDER_BY_ID_QUERY = `
     orders(first: 1, query: $nameQuery) {
       edges {
         node {
-          customer {
-            firstName
-            lastName
-          }
+          
           ...OrderFragment
         }
       }
@@ -150,5 +153,6 @@ const GET_ORDER_BY_ID_QUERY = `
 module.exports = {
   fetchShopifyData,
   GET_LATEST_ORDER_BY_CUSTOMER_PHONE_QUERY,
-  GET_ORDER_BY_ID_QUERY
+  GET_ORDER_BY_ID_QUERY,
 };
+

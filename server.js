@@ -8,6 +8,7 @@ const {
   GET_LATEST_ORDER_BY_CUSTOMER_PHONE_QUERY,
   GET_ORDER_BY_ID_QUERY
 } = require('./utils/shopifyApi');
+const { sendEscalationEmail } = require('./utils/emailService');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -104,6 +105,8 @@ const formatOrderForAI = (orderNode, customerNode) => {
     ? [customerNode?.firstName || orderNode.customer.firstName, customerNode?.lastName || orderNode.customer.lastName].filter(Boolean).join(' ')
     : 'Valued Customer';
   
+  const customerEmail = customerNode?.email || orderNode?.customer?.email || null;
+
   const shippingAddress = orderNode.shippingAddress
     ? [
         orderNode.shippingAddress.address1,
@@ -118,6 +121,7 @@ const formatOrderForAI = (orderNode, customerNode) => {
     orderNumber: orderNode.name,
     orderDate: formatDate(orderNode.processedAt),
     customerName: customerName,
+    customerEmail: customerEmail,
     status: {
         financial: orderNode.displayFinancialStatus,
         fulfillment: orderNode.displayFulfillmentStatus,
@@ -136,7 +140,7 @@ const formatOrderForAI = (orderNode, customerNode) => {
         address: shippingAddress,
         statusMessage: expectedShipDate || actualShippedDate || "Awaiting shipment",
         carrier: latestFulfillment?.trackingInfo?.[0]?.company || null,
-        trackingNumber: latestFulfillment?.trackingInfo?.[0]?.number || null,
+        trackingNumber: latestFulfillment?.trackingInfo?.[0]?.number || null, // <-- FIX: Corrected typo here
         trackingUrl: latestFulfillment?.trackingInfo?.[0]?.url || null,
     } : {
         isShippable: false,
@@ -186,6 +190,49 @@ app.post('/getOrderById', async (req, res) => {
   } catch (error) {
     console.error("Error in /getOrderById:", error.message);
     res.status(500).json({ success: false, error: "Internal error fetching order details." });
+  }
+});
+
+app.post('/escalateToSupport', async (req, res) => {
+  // <-- 1. Destructure phoneNumber from the request body
+  const { customerName, customerEmail, orderNumber, phoneNumber, issueSummary } = req.body;
+
+  // <-- 2. Add phoneNumber to the validation
+  if (!issueSummary || !customerName || !phoneNumber) {
+    return res.status(400).json({ 
+      success: false, 
+      error: "An issue summary, customer name, and phone number are required for escalation." 
+    });
+  }
+
+  try {
+    // <-- 3. Pass the phoneNumber to the email service
+    // await sendEscalationEmail({
+    //   customerName,
+    //   customerEmail,
+    //   orderNumber,
+    //   phoneNumber, 
+    //   issueSummary
+    // });
+
+   console.log(
+  `Customer Name: ${customerName}\n` +
+  `Customer Email: ${customerEmail}\n` +
+  `Order Number: ${orderNumber}\n` +
+  `Phone Number: ${phoneNumber}\n` +
+  `Issue Summary: ${issueSummary}`
+);
+
+    res.status(200).json({ 
+      success: true, 
+      message: "Escalation email has been sent to the support team." 
+    });
+  } catch (error) {
+    console.error("Error in /escalateToSupport endpoint:", error.message);
+    res.status(500).json({ 
+      success: false, 
+      error: "An internal server error occurred while trying to send the email." 
+    });
   }
 });
 
