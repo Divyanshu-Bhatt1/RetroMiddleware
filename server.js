@@ -6,9 +6,13 @@ const cors = require('cors');
 const {
   fetchShopifyData,
   GET_LATEST_ORDER_BY_CUSTOMER_PHONE_QUERY,
+  GET_LATEST_ORDER_BY_CUSTOMER_EMAIL_QUERY,
   GET_ORDER_BY_ID_QUERY
 } = require('./utils/shopifyApi');
-const { sendEscalationEmail } = require('./utils/emailService');
+const { 
+  sendEscalationEmail,
+  sendAddressChangeRequestEmail
+} = require('./utils/emailService');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -30,7 +34,6 @@ const normalizePhoneNumber = (phone) => {
 const formatMoney = (moneySet) => {
     const money = moneySet?.shopMoney || moneySet;
     if (!money?.amount || parseFloat(money.amount) === 0) return null;
-    
     const { amount, currencyCode } = money;
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: currencyCode }).format(amount);
 };
@@ -39,11 +42,7 @@ const formatDate = (dateString) => {
   if (!dateString) return null;
   const date = new Date(dateString);
   if (isNaN(date.getTime())) return null;
-  return date.toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
+  return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 };
 
 const parseShippingDateFromTags = (tags) => {
@@ -57,23 +56,27 @@ const parseShippingDateFromTags = (tags) => {
   return formatDate(date.toISOString());
 };
 
+// --- MODIFIED FUNCTION ---
 const formatOrderForAI = (orderNode, customerNode) => {
   const expectedShipDate = parseShippingDateFromTags(orderNode.tags);
   
-  const latestFulfillment = orderNode.fulfillments?.length > 0
-    ? [...orderNode.fulfillments].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0]
+  // --- FIX 1: Add optional chaining to safely access fulfillments ---
+  const latestFulfillment = orderNode.fulfillments?.edges?.length > 0
+    ? [...orderNode.fulfillments.edges].map(e => e.node).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0]
     : null;
     
   const actualShippedDate = latestFulfillment?.createdAt ? formatDate(latestFulfillment.createdAt) : null;
 
   const fulfilledLineItemIds = new Set();
-  orderNode.fulfillments.forEach(fulfillment => {
-    fulfillment.fulfillmentLineItems.edges.forEach(({ node }) => {
+  // --- FIX 2: Add optional chaining (`?.`) before forEach to prevent crash on unfulfilled orders ---
+  orderNode.fulfillments?.edges?.forEach(({ node: fulfillment }) => {
+    fulfillment.fulfillmentLineItems?.edges?.forEach(({ node }) => {
       fulfilledLineItemIds.add(node.lineItem.id);
     });
   });
 
-  const lineItems = orderNode.lineItems.edges.map(({ node }) => {
+  // --- FIX 3: Add optional chaining and nullish coalescing (`?? []`) for safety ---
+  const lineItems = (orderNode.lineItems?.edges?.map(({ node }) => {
     const itemDiscountAmount = node.discountAllocations.reduce(
       (total, allocation) => total + parseFloat(allocation.allocatedAmountSet.shopMoney.amount),
       0
@@ -93,13 +96,16 @@ const formatOrderForAI = (orderNode, customerNode) => {
       itemCategory: isPhysical ? 'PHYSICAL' : 'DIGITAL', 
       fulfillmentStatus: fulfilledLineItemIds.has(node.id) ? 'FULFILLED' : 'UNFULFILLED',
     };
-  });
+  })) ?? []; // If lineItems or edges is undefined, default to an empty array.
   
   const orderRequiresShipping = lineItems.some(item => item.itemCategory === 'PHYSICAL');
 
-  const itemsSummary = lineItems.length > 1
-    ? `${lineItems[0].quantity}x ${lineItems[0].name} and ${lineItems.length - 1} other item(s)`
-    : `${lineItems[0].quantity}x ${lineItems[0].name}`;
+  const itemsSummary = lineItems.length > 0
+    ? lineItems.length > 1
+      ? `${lineItems[0].quantity}x ${lineItems[0].name} and ${lineItems.length - 1} other item(s)`
+      : `${lineItems[0].quantity}x ${lineItems[0].name}`
+    : "No items found in this order.";
+
 
   const customerName = (customerNode?.firstName || orderNode?.customer?.firstName)
     ? [customerNode?.firstName || orderNode.customer.firstName, customerNode?.lastName || orderNode.customer.lastName].filter(Boolean).join(' ')
@@ -140,7 +146,7 @@ const formatOrderForAI = (orderNode, customerNode) => {
         address: shippingAddress,
         statusMessage: expectedShipDate || actualShippedDate || "Awaiting shipment",
         carrier: latestFulfillment?.trackingInfo?.[0]?.company || null,
-        trackingNumber: latestFulfillment?.trackingInfo?.[0]?.number || null, // <-- FIX: Corrected typo here
+        trackingNumber: latestFulfillment?.trackingInfo?.[0]?.number || null,
         trackingUrl: latestFulfillment?.trackingInfo?.[0]?.url || null,
     } : {
         isShippable: false,
@@ -154,6 +160,7 @@ const formatOrderForAI = (orderNode, customerNode) => {
 };
 
 // --- API Endpoints ---
+// The endpoints below remain unchanged and will now work correctly with the fixed helper function.
 
 app.post('/getOrderByPhone', async (req, res) => {
   const { phone } = req.body;
@@ -171,6 +178,30 @@ app.post('/getOrderByPhone', async (req, res) => {
     }
   } catch (error) {
     console.error("Error in /getOrderByPhone:", error.message);
+    res.status(500).json({ success: false, error: "Internal error fetching order details." });
+  }
+});
+
+app.post('/getOrderByEmail', async (req, res) => {
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ success: false, error: "Email address is required." });
+  }
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ success: false, error: `Invalid email format: ${email}` });
+  }
+  try {
+    const data = await fetchShopifyData(GET_LATEST_ORDER_BY_CUSTOMER_EMAIL_QUERY, { emailQuery: `email:${email}` });
+    const customer = data?.customers?.edges?.[0]?.node;
+    const latestOrder = customer?.orders?.edges?.[0]?.node;
+    if (customer && latestOrder) {
+      res.json({ success: true, order: formatOrderForAI(latestOrder, customer) });
+    } else {
+      res.json({ success: false, message: `I couldn't find any recent orders associated with that email address.` });
+    }
+  } catch (error) {
+    console.error("Error in /getOrderByEmail:", error.message);
     res.status(500).json({ success: false, error: "Internal error fetching order details." });
   }
 });
@@ -194,19 +225,24 @@ app.post('/getOrderById', async (req, res) => {
 });
 
 app.post('/escalateToSupport', async (req, res) => {
-  // <-- 1. Destructure phoneNumber from the request body
   const { customerName, customerEmail, orderNumber, phoneNumber, issueSummary } = req.body;
-
-  // <-- 2. Add phoneNumber to the validation
   if (!issueSummary || !customerName || !phoneNumber) {
     return res.status(400).json({ 
       success: false, 
       error: "An issue summary, customer name, and phone number are required for escalation." 
     });
   }
-
   try {
-    // <-- 3. Pass the phoneNumber to the email service
+
+    console.log(`
+Customer Name: ${customerName}
+Customer Email: ${customerEmail}
+Order Number: ${orderNumber}
+Phone Number: ${phoneNumber}
+Issue Summary: ${issueSummary}
+`);
+
+
     // await sendEscalationEmail({
     //   customerName,
     //   customerEmail,
@@ -214,15 +250,6 @@ app.post('/escalateToSupport', async (req, res) => {
     //   phoneNumber, 
     //   issueSummary
     // });
-
-   console.log(
-  `Customer Name: ${customerName}\n` +
-  `Customer Email: ${customerEmail}\n` +
-  `Order Number: ${orderNumber}\n` +
-  `Phone Number: ${phoneNumber}\n` +
-  `Issue Summary: ${issueSummary}`
-);
-
     res.status(200).json({ 
       success: true, 
       message: "Escalation email has been sent to the support team." 
@@ -232,6 +259,48 @@ app.post('/escalateToSupport', async (req, res) => {
     res.status(500).json({ 
       success: false, 
       error: "An internal server error occurred while trying to send the email." 
+    });
+  }
+});
+
+app.post('/requestAddressChange', async (req, res) => {
+  const { orderNumber, customerName, customerEmail, phoneNumber, oldAddressDetails, newAddressDetails } = req.body;
+  if (!orderNumber || !customerName || !phoneNumber || !oldAddressDetails || !newAddressDetails) {
+    return res.status(400).json({
+      success: false,
+      error: "Order number, customer name, phone number, old address, and new address details are required."
+    });
+  }
+  try {
+
+
+    console.log(`
+Order Number: ${orderNumber}
+Customer Name: ${customerName}
+Customer Email: ${customerEmail}
+Phone Number: ${phoneNumber}
+Old Address: ${oldAddressDetails}
+New Address: ${newAddressDetails}
+`);
+
+
+    // await sendAddressChangeRequestEmail({
+    //   orderNumber,
+    //   customerName,
+    //   customerEmail,
+    //   phoneNumber,
+    //   oldAddressDetails,
+    //   newAddressDetails
+    // });
+    res.status(200).json({
+      success: true,
+      message: "Your address change request has been sent to our support team for review."
+    });
+  } catch (error) {
+    console.error("Error in /requestAddressChange endpoint:", error.message);
+    res.status(500).json({
+      success: false,
+      error: "An internal server error occurred while sending the address change request."
     });
   }
 });

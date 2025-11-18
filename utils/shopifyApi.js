@@ -136,13 +136,35 @@ const GET_LATEST_ORDER_BY_CUSTOMER_PHONE_QUERY = `
   }
 `;
 
+// --- ADDED: New query to find the latest order by customer email ---
+const GET_LATEST_ORDER_BY_CUSTOMER_EMAIL_QUERY = `
+  ${ORDER_FRAGMENT}
+  query getCustomerAndLastOrderByEmail($emailQuery: String!) {
+    customers(first: 1, query: $emailQuery) {
+      edges {
+        node {
+          firstName
+          lastName
+          email
+          orders(first: 1, sortKey: PROCESSED_AT, reverse: true) {
+            edges {
+              node {
+                ...OrderFragment
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
 const GET_ORDER_BY_ID_QUERY = `
   ${ORDER_FRAGMENT}
   query getOrderById($nameQuery: String!) {
     orders(first: 1, query: $nameQuery) {
       edges {
         node {
-          
           ...OrderFragment
         }
       }
@@ -153,6 +175,6 @@ const GET_ORDER_BY_ID_QUERY = `
 module.exports = {
   fetchShopifyData,
   GET_LATEST_ORDER_BY_CUSTOMER_PHONE_QUERY,
+  GET_LATEST_ORDER_BY_CUSTOMER_EMAIL_QUERY, // Exported new query
   GET_ORDER_BY_ID_QUERY,
 };
-
