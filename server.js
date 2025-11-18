@@ -248,22 +248,22 @@ app.post('/escalateToSupport', async (req, res) => {
   }
   try {
 
-    console.log(`
-Customer Name: ${customerName}
-Customer Email: ${customerEmail}
-Order Number: ${orderNumber}
-Phone Number: ${phoneNumber}
-Issue Summary: ${issueSummary}
-`);
+//     console.log(`
+// Customer Name: ${customerName}
+// Customer Email: ${customerEmail}
+// Order Number: ${orderNumber}
+// Phone Number: ${phoneNumber}
+// Issue Summary: ${issueSummary}
+// `);
 
 
-    // await sendEscalationEmail({
-    //   customerName,
-    //   customerEmail,
-    //   orderNumber,
-    //   phoneNumber, 
-    //   issueSummary
-    // });
+    await sendEscalationEmail({
+      customerName,
+      customerEmail,
+      orderNumber,
+      phoneNumber, 
+      issueSummary
+    });
     res.status(200).json({ 
       success: true, 
       message: "Escalation email has been sent to the support team." 
@@ -288,24 +288,24 @@ app.post('/requestAddressChange', async (req, res) => {
   try {
 
 
-    console.log(`
-Order Number: ${orderNumber}
-Customer Name: ${customerName}
-Customer Email: ${customerEmail}
-Phone Number: ${phoneNumber}
-Old Address: ${oldAddressDetails}
-New Address: ${newAddressDetails}
-`);
+//     console.log(`
+// Order Number: ${orderNumber}
+// Customer Name: ${customerName}
+// Customer Email: ${customerEmail}
+// Phone Number: ${phoneNumber}
+// Old Address: ${oldAddressDetails}
+// New Address: ${newAddressDetails}
+// `);
 
 
-    // await sendAddressChangeRequestEmail({
-    //   orderNumber,
-    //   customerName,
-    //   customerEmail,
-    //   phoneNumber,
-    //   oldAddressDetails,
-    //   newAddressDetails
-    // });
+    await sendAddressChangeRequestEmail({
+      orderNumber,
+      customerName,
+      customerEmail,
+      phoneNumber,
+      oldAddressDetails,
+      newAddressDetails
+    });
     res.status(200).json({
       success: true,
       message: "Your address change request has been sent to our support team for review."
