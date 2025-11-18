@@ -57,25 +57,36 @@ const parseShippingDateFromTags = (tags) => {
 };
 
 // --- MODIFIED FUNCTION ---
+// server.js (updated section)
+
+// --- MODIFIED FUNCTION ---
+// server.js (updated section)
+
+// --- CORRECTED FUNCTION ---
 const formatOrderForAI = (orderNode, customerNode) => {
   const expectedShipDate = parseShippingDateFromTags(orderNode.tags);
   
-  // --- FIX 1: Add optional chaining to safely access fulfillments ---
-  const latestFulfillment = orderNode.fulfillments?.edges?.length > 0
-    ? [...orderNode.fulfillments.edges].map(e => e.node).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0]
+  // Use the correct data access for fulfillments (as a direct array) and make it safe
+  const latestFulfillment = orderNode.fulfillments?.length > 0
+    ? [...orderNode.fulfillments].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0]
     : null;
     
   const actualShippedDate = latestFulfillment?.createdAt ? formatDate(latestFulfillment.createdAt) : null;
 
+  // --- FIX: Correctly build the set of fulfilled item IDs from the fulfillments array ---
   const fulfilledLineItemIds = new Set();
-  // --- FIX 2: Add optional chaining (`?.`) before forEach to prevent crash on unfulfilled orders ---
-  orderNode.fulfillments?.edges?.forEach(({ node: fulfillment }) => {
+  
+  // Iterate over `orderNode.fulfillments` directly, as it's an array. Add safety checks.
+  orderNode.fulfillments?.forEach(fulfillment => {
+    // The items within a fulfillment ARE a connection, so we access .edges here.
     fulfillment.fulfillmentLineItems?.edges?.forEach(({ node }) => {
-      fulfilledLineItemIds.add(node.lineItem.id);
+      if (node.lineItem?.id) {
+        fulfilledLineItemIds.add(node.lineItem.id);
+      }
     });
   });
 
-  // --- FIX 3: Add optional chaining and nullish coalescing (`?? []`) for safety ---
+  // Safely map the line items and determine their individual fulfillment status
   const lineItems = (orderNode.lineItems?.edges?.map(({ node }) => {
     const itemDiscountAmount = node.discountAllocations.reduce(
       (total, allocation) => total + parseFloat(allocation.allocatedAmountSet.shopMoney.amount),
@@ -86,6 +97,9 @@ const formatOrderForAI = (orderNode, customerNode) => {
     const productType = node.variant?.product?.productType || '';
     const isPhysical = node.requiresShipping || physicalProductTypes.includes(productType);
 
+    // Check if this item's ID is in our set of fulfilled IDs
+    const itemFulfillmentStatus = fulfilledLineItemIds.has(node.id) ? 'FULFILLED' : 'UNFULFILLED';
+
     return {
       name: node.title,
       variant: node.variant?.title || 'Default',
@@ -94,18 +108,18 @@ const formatOrderForAI = (orderNode, customerNode) => {
       totalPrice: formatMoney(node.discountedTotalSet),
       discount: formatMoney({ shopMoney: { amount: itemDiscountAmount, currencyCode: node.originalUnitPriceSet.shopMoney.currencyCode } }),
       itemCategory: isPhysical ? 'PHYSICAL' : 'DIGITAL', 
-      fulfillmentStatus: fulfilledLineItemIds.has(node.id) ? 'FULFILLED' : 'UNFULFILLED',
+      fulfillmentStatus: itemFulfillmentStatus, // Assign the correct individual status
     };
-  })) ?? []; // If lineItems or edges is undefined, default to an empty array.
+  })) ?? []; // Default to an empty array if lineItems or edges are missing
   
   const orderRequiresShipping = lineItems.some(item => item.itemCategory === 'PHYSICAL');
 
+  // Make itemsSummary safe for orders with zero items
   const itemsSummary = lineItems.length > 0
     ? lineItems.length > 1
       ? `${lineItems[0].quantity}x ${lineItems[0].name} and ${lineItems.length - 1} other item(s)`
       : `${lineItems[0].quantity}x ${lineItems[0].name}`
     : "No items found in this order.";
-
 
   const customerName = (customerNode?.firstName || orderNode?.customer?.firstName)
     ? [customerNode?.firstName || orderNode.customer.firstName, customerNode?.lastName || orderNode.customer.lastName].filter(Boolean).join(' ')
