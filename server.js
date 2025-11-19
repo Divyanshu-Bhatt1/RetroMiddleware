@@ -6,7 +6,6 @@ const cors = require('cors');
 const {
   fetchShopifyData,
   GET_LATEST_ORDER_BY_CUSTOMER_PHONE_QUERY,
-  GET_LATEST_ORDER_BY_CUSTOMER_EMAIL_QUERY,
   GET_ORDER_BY_ID_QUERY
 } = require('./utils/shopifyApi');
 const { 
@@ -22,7 +21,6 @@ app.use(express.json());
 
 app.get('/health', (req, res) => res.status(200).send('Server is running!'));
 
-// --- Helper Functions ---
 
 const normalizePhoneNumber = (phone) => {
   if (!phone || typeof phone !== 'string') return null;
@@ -56,13 +54,7 @@ const parseShippingDateFromTags = (tags) => {
   return formatDate(date.toISOString());
 };
 
-// --- MODIFIED FUNCTION ---
-// server.js (updated section)
 
-// --- MODIFIED FUNCTION ---
-// server.js (updated section)
-
-// --- CORRECTED FUNCTION ---
 const formatOrderForAI = (orderNode, customerNode) => {
   const expectedShipDate = parseShippingDateFromTags(orderNode.tags);
   
@@ -196,29 +188,6 @@ app.post('/getOrderByPhone', async (req, res) => {
   }
 });
 
-app.post('/getOrderByEmail', async (req, res) => {
-  const { email } = req.body;
-  if (!email) {
-    return res.status(400).json({ success: false, error: "Email address is required." });
-  }
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(email)) {
-    return res.status(400).json({ success: false, error: `Invalid email format: ${email}` });
-  }
-  try {
-    const data = await fetchShopifyData(GET_LATEST_ORDER_BY_CUSTOMER_EMAIL_QUERY, { emailQuery: `email:${email}` });
-    const customer = data?.customers?.edges?.[0]?.node;
-    const latestOrder = customer?.orders?.edges?.[0]?.node;
-    if (customer && latestOrder) {
-      res.json({ success: true, order: formatOrderForAI(latestOrder, customer) });
-    } else {
-      res.json({ success: false, message: `I couldn't find any recent orders associated with that email address.` });
-    }
-  } catch (error) {
-    console.error("Error in /getOrderByEmail:", error.message);
-    res.status(500).json({ success: false, error: "Internal error fetching order details." });
-  }
-});
 
 app.post('/getOrderById', async (req, res) => {
   const { orderNumber } = req.body;
