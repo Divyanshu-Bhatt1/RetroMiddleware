@@ -113,6 +113,11 @@ const formatOrderForAI = (orderNode, customerNode) => {
       : `${lineItems[0].quantity}x ${lineItems[0].name}`
     : "No items found in this order.";
 
+  const netSubtotalVal = parseFloat(orderNode.subtotalPriceSet?.shopMoney?.amount || 0);
+  const discountVal = parseFloat(orderNode.totalDiscountsSet?.shopMoney?.amount || 0);
+  const grossSubtotalVal = netSubtotalVal + discountVal;
+  const currencyCode = orderNode.subtotalPriceSet?.shopMoney?.currencyCode || 'USD';
+
   const customerName = (customerNode?.firstName || orderNode?.customer?.firstName)
     ? [customerNode?.firstName || orderNode.customer.firstName, customerNode?.lastName || orderNode.customer.lastName].filter(Boolean).join(' ')
     : 'Valued Customer';
@@ -139,7 +144,7 @@ const formatOrderForAI = (orderNode, customerNode) => {
         fulfillment: orderNode.displayFulfillmentStatus,
     },
     pricing: {
-        subtotal: formatMoney(orderNode.subtotalPriceSet),
+        subtotal: formatMoney({ shopMoney: { amount: grossSubtotalVal, currencyCode: currencyCode } }),
         shipping: formatMoney(orderNode.totalShippingPriceSet),
         tax: formatMoney(orderNode.totalTaxSet),
         totalDiscount: formatMoney(orderNode.totalDiscountsSet),
