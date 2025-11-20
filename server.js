@@ -63,7 +63,7 @@ const formatOrderForAI = (orderNode, customerNode) => {
     ? [...orderNode.fulfillments].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0]
     : null;
     
-  const actualShippedDate = latestFulfillment?.createdAt ? formatDate(latestFulfillment.createdAt) : null;
+  // const actualShippedDate = latestFulfillment?.createdAt ? formatDate(latestFulfillment.createdAt) : null;
 
   // --- FIX: Correctly build the set of fulfilled item IDs from the fulfillments array ---
   const fulfilledLineItemIds = new Set();
@@ -150,7 +150,7 @@ const formatOrderForAI = (orderNode, customerNode) => {
     shippingInfo: orderRequiresShipping ? {
         isShippable: true,
         address: shippingAddress,
-        statusMessage: expectedShipDate || actualShippedDate || "Awaiting shipment",
+        statusMessage: expectedShipDate  || "Shipped within 2-7 days",
         carrier: latestFulfillment?.trackingInfo?.[0]?.company || null,
         trackingNumber: latestFulfillment?.trackingInfo?.[0]?.number || null,
         trackingUrl: latestFulfillment?.trackingInfo?.[0]?.url || null,
