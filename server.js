@@ -2,6 +2,7 @@
 
 require('dotenv').config();
 const express = require('express');
+const https = require('https');
 const cors = require('cors');
 const {
   fetchShopifyData,
@@ -293,4 +294,32 @@ app.post('/requestAddressChange', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`Middleware server running on http://localhost:${PORT}`));
+
+app.listen(PORT, () => {
+  console.log(`Middleware server running on port ${PORT}`);
+
+  // =======================================================================
+  // SELF-PINGING CODE
+  // =======================================================================
+  // Replace with this app's actual Render URL
+  const RENDER_APP_URL = process.env.RENDER_EXTERNAL_URL;
+  const PING_URL = `${RENDER_APP_URL}/health`; 
+
+  const keepAlive = () => {
+    https.get(PING_URL, (res) => {
+      if (res.statusCode === 200) {
+        console.log('Self-ping successful: Server kept awake.');
+      } else {
+        console.error(`Self-ping failed with status: ${res.statusCode}`);
+      }
+    }).on('error', (err) => {
+      console.error('Self-ping error:', err.message);
+    });
+  };
+
+  // 840,000 milliseconds = 14 minutes.
+  setInterval(keepAlive, 840000);
+  // =======================================================================
+});
+
+// app.listen(PORT, () => console.log(`Middleware server running on http://localhost:${PORT}`));
